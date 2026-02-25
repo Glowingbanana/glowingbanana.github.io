@@ -1,4 +1,4 @@
-/* ========= Globals ========= *//* ========= Config ========= */
+/* ========= Config ========= */
 const CONFIG = {
   NORMALIZE_CURRENCY_TO: null, // set to 'SGD' to map "Singapore Dollar" -> "SGD"
   DATE_FORMAT: 'dd/mm/yyyy',   // exported display format (we store true dates)
@@ -41,7 +41,6 @@ const textInput  = document.getElementById('textInput');
 const ocrWorker = Tesseract.createWorker({
   workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
   corePath:   'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.0.0/tesseract-core.wasm.js',
-  // Language files (eng.traineddata.gz etc.)
   langPath:   'https://tessdata.projectnaptha.com/4.0.0',
   logger: m => {
     if (m && m.status && typeof m.progress === 'number') {
@@ -53,7 +52,7 @@ const ocrWorker = Tesseract.createWorker({
 async function ensureOCR() {
   if (ocrReady) return;
   await ocrWorker.load();
-  await ocrWorker.loadLanguage('eng');   // add more languages if needed
+  await ocrWorker.loadLanguage('eng');
   await ocrWorker.initialize('eng');
   ocrReady = true;
 }
@@ -137,8 +136,7 @@ async function convertPDF() {
 
   const pasted = (textInput.value || '').trim();
   if (pasted.length > 0) {
-    // Treat pasted text as one "page" chunk.
-    const rows = await extractRowsFromText(pasted, { forceOCR: false, excludeDraft: excludeDraftCb.checked });
+    const rows = await extractRowsFromText(pasted, { excludeDraft: excludeDraftCb.checked });
     exportRows = rows;
     extractedDataRaw = pasted;
 
@@ -168,7 +166,6 @@ async function convertSelectedPDF() {
     const arrayBuffer = await selectedFile.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
-    // --- Invoice contexts keyed by Invoice No ---
     const invoices = new Map(); // invoiceNo -> { header:{...}, items:[], totals:{...}, gstRate }
     let currentInvoiceNo = null;
 
@@ -205,7 +202,7 @@ async function convertSelectedPDF() {
       // Keep a human preview
       extractedDataRaw += `\n\n--- Page ${i} ---\n` + pageText;
 
-      // Normalize text once
+      // Normalize
       const norm = normalize(pageText);
 
       // 1) Detect invoice number (start/switch context)
@@ -213,52 +210,45 @@ async function convertSelectedPDF() {
       if (invNo) currentInvoiceNo = invNo;
 
       if (!currentInvoiceNo) {
-        // No invoice number yet → skip (or carry previous if present)
         continue;
       }
 
       const inv = getOrCreateInvoice(invoices, currentInvoiceNo);
 
-      // 2) Header fields (fill if not already captured)
+      // 2) Header fields
       const hdr = extractHeaderFields(norm);
       assignHeader(inv.header, hdr);
 
-      // 3) GST rate (per invoice if appears)
+      // 3) GST rate
       const gstRate = findGSTRate(norm);
       if (gstRate != null) inv.gstRate = gstRate;
 
-      // 4) Line items on this page
+      // 4) Line items
       const items = extractLineItems(norm);
       if (items.length) inv.items.push(...items);
 
-      // 5) Totals (may be on this or next page)
+      // 5) Totals
       const totals = extractTotals(norm);
       assignTotals(inv.totals, totals);
     }
 
-    // --- Post-processing: compute missing totals & build Option A rows ---
+    // Build rows
     const excludeDraft = !!excludeDraftCb.checked;
     exportRows = [];
 
     invoices.forEach((inv, invNo) => {
-      // If status is Draft and excludeDraft is on, skip entirely
       const st = (inv.header.invoiceStatus || '').toLowerCase();
       if (excludeDraft && st === 'draft') return;
 
-      // Compute totals if missing
-      if (!hasAllTotals(inv.totals)) {
-        computeTotals(inv);
-      }
+      if (!hasAllTotals(inv.totals)) computeTotals(inv);
 
-      // Currency normalization
       if (CONFIG.NORMALIZE_CURRENCY_TO === 'SGD' && inv.totals.currency) {
         inv.totals.currency = 'SGD';
       }
 
-      // Emit rows (one per line item), repeating header & totals
+      // Emit option A rows
       for (const li of inv.items) {
         exportRows.push([
-          // Header (repeated)
           inv.header.vendorId || '',
           inv.header.attentionTo || '',
           toExcelDate(inv.header.invoiceDate) || inv.header.invoiceDate || '',
@@ -269,7 +259,6 @@ async function convertSelectedPDF() {
           inv.header.instructionId || '',
           inv.header.headerDescription || '',
 
-          // Line item
           li.lineNo ?? '',
           li.description || '',
           toNumber(li.quantity),
@@ -278,7 +267,6 @@ async function convertSelectedPDF() {
           li.gstRate != null ? toNumber(li.gstRate) : (inv.gstRate != null ? inv.gstRate : ''),
           toNumber(li.grossInc),
 
-          // Totals (repeated)
           inv.totals.currency || '',
           toNumber(inv.totals.subtotal),
           toNumber(inv.totals.gst),
@@ -288,7 +276,6 @@ async function convertSelectedPDF() {
       }
     });
 
-    // Preview & success UI
     const previewText = extractedDataRaw.substring(0, 800) + (extractedDataRaw.length > 800 ? '…' : '');
     previewContent.textContent = previewText;
     preview.classList.add('show');
@@ -316,7 +303,6 @@ function downloadExcel() {
   }
 
   try {
-    // Column headers in the exact order requested (Option A)
     const headers = [
       'Vendor ID',
       'Attention To',
@@ -344,32 +330,12 @@ function downloadExcel() {
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet([headers, ...exportRows]);
 
-    // Column widths (tuned for readability)
     ws['!cols'] = [
-      { wch: 12 }, // Vendor ID
-      { wch: 18 }, // Attention To
-      { wch: 12 }, // Invoice Date
-      { wch: 10 }, // Credit Term
-      { wch: 18 }, // Invoice No
-      { wch: 18 }, // Related Invoice No
-      { wch: 12 }, // Invoice Status
-      { wch: 20 }, // Invoicing Instruction ID
-      { wch: 70 }, // Header Description
-      { wch: 6  }, // No.
-      { wch: 70 }, // Line-item Description
-      { wch: 10 }, // Quantity
-      { wch: 12 }, // Unit Price
-      { wch: 16 }, // Gross Ex
-      { wch: 8  }, // GST %
-      { wch: 18 }, // Gross Inc
-      { wch: 16 }, // Currency
-      { wch: 20 }, // Subtotal
-      { wch: 18 }, // GST
-      { wch: 16 }, // Freight
-      { wch: 20 }  // Total
+      { wch: 12 }, { wch: 18 }, { wch: 12 }, { wch: 10 }, { wch: 18 },
+      { wch: 18 }, { wch: 12 }, { wch: 20 }, { wch: 70 }, { wch: 6  },
+      { wch: 70 }, { wch: 10 }, { wch: 12 }, { wch: 16 }, { wch: 8  },
+      { wch: 18 }, { wch: 16 }, { wch: 20 }, { wch: 18 }, { wch: 16 }, { wch: 20 }
     ];
-
-    // Freeze header row
     ws['!freeze'] = { xSplit: 0, ySplit: 1 };
 
     XLSX.utils.book_append_sheet(wb, ws, 'Invoice Lines');
@@ -392,7 +358,6 @@ window.downloadExcel = downloadExcel;
 
 function normalize(s) {
   if (!s) return '';
-  // unify whitespace + colons, remove stray non-breaking spaces
   let t = s.replace(/\u00A0/g, ' ');
   t = t.replace(/\s*:\s*/g, ' : ');
   t = t.replace(/\s+/g, ' ').trim();
@@ -410,20 +375,18 @@ function toNumber(v) {
 function toExcelDate(dmy) {
   // expects dd/mm/yyyy or d/m/yyyy; returns JS Date or ''
   if (!dmy || typeof dmy !== 'string') return '';
-  const m = dmy.match(/^([0-3]?\d)[\/\-]([01]?\d)[\/\-](\d{2,4})$/);
+  const m = dmy.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
   if (!m) return '';
-  let [_, d, mth, y] = m;
+  let [, d, mth, y] = m;
   if (y.length === 2) y = '20' + y;
-  const date = new Date(parseInt(y), parseInt(mth) - 1, parseInt(d));
+  const date = new Date(parseInt(y, 10), parseInt(mth, 10) - 1, parseInt(d, 10));
   return isNaN(date.getTime()) ? '' : date;
 }
 
 function getOrCreateInvoice(map, invoiceNo) {
   if (!map.has(invoiceNo)) {
     map.set(invoiceNo, {
-      header: {
-        invoiceNo
-      },
+      header: { invoiceNo },
       items: [],
       totals: {},
       gstRate: null
@@ -465,8 +428,6 @@ function extractHeaderFields(text) {
   const instr = text.match(/Invoicing\s*Instruction\s*ID\s*:\s*([A-Z0-9-]+)/i);
   if (instr) out.instructionId = instr[1];
 
-  // Header Description: capture after "Description :" until any strong boundary token
-  // such as "No." (list begins), "Currency :", "Invoice Amount Summary", or end.
   const desc = text.match(/Description\s*:\s*(.+?)(?=\s(?:No\.\s|Currency\s*:|Invoice\s*Amount\s*Summary|Sub\s*Total|Total\s*GST|Freight\s*Amount|Total\s*Invoice\s*Amount|$))/i);
   if (desc) out.headerDescription = desc[1].trim();
 
@@ -475,7 +436,6 @@ function extractHeaderFields(text) {
 
 function assignHeader(target, src) {
   if (!src) return;
-  // only set if not already populated (first data wins)
   for (const k of Object.keys(src)) {
     if (target[k] == null || target[k] === '') {
       target[k] = src[k];
@@ -490,11 +450,7 @@ function findGSTRate(text) {
   return parseFloat(m[1]);
 }
 
-/* ---- Line items extraction ----
-   We match lines that begin with a small integer (No.) and end with 4 numeric fields:
-   Quantity, Unit Price, Gross Ex, GST Amount, Gross Inc.
-   Some PDFs include an extra "0" token before quantity; we allow it via (?:0\s+)?
-*/
+/* ---- Line items extraction ---- */
 function extractLineItems(text) {
   const items = [];
   const rx = /(?:^|\s)(\d{1,3})\s+(.+?)\s+(?:0\s+)?(\d+(?:\.\d{1,5})?)\s+([0-9][0-9,]*\.\d{2})\s+([0-9][0-9,]*\.\d{2})\s+([0-9][0-9,]*\.\d{2})\s+([0-9][0-9,]*\.\d{2})(?=\s|$)/gi;
@@ -509,13 +465,11 @@ function extractLineItems(text) {
     const gstAmt  = m[6];
     const grossInc = m[7];
 
-    // Heuristic: ignore obviously wrong matches (e.g., too short description)
     if (description.length < 5) continue;
 
-    // Try to infer GST rate per line (gstAmt / grossEx * 100), else leave blank
     let gstRate = null;
     const ex = toNumber(grossEx);
-    const g = toNumber(gstAmt);
+    const g  = toNumber(gstAmt);
     if (Number.isFinite(ex) && ex > 0 && Number.isFinite(g)) {
       gstRate = Math.round((g / ex) * 1000) / 10; // 1 decimal
     }
@@ -589,9 +543,77 @@ function computeTotals(inv) {
   inv.totals.total    = total > 0 ? total.toFixed(2)
                                   : (subtotal + gst + toNumber(inv.totals.freight || 0)).toFixed(2);
 
-  if (!inv.totals.currency) inv.totals.currency = 'Singapore Dollar'; // sensible default
+  if (!inv.totals.currency) inv.totals.currency = 'Singapore Dollar'; // default
 }
 
-/* ========= Expose (onclick) ========= */
-window.downloadExcel = downloadExcel;
-window.convertPDF = convertPDF;
+/* ========= Pasted text handler ========= */
+async function extractRowsFromText(text, { excludeDraft }) {
+  const invoices = new Map();
+  let currentInvoiceNo = null;
+
+  const norm = normalize(text);
+
+  // Split into pseudo-pages on headers or totals markers to reduce accidental cross-matching
+  const chunks = norm.split(/\s(?:Tax\s*Invoice|Invoice\s*Amount\s*Summary)\s/i);
+
+  for (const chunk of chunks) {
+    if (!chunk || chunk.length < 10) continue;
+
+    const invNo = findInvoiceNo(chunk);
+    if (invNo) currentInvoiceNo = invNo;
+    if (!currentInvoiceNo) continue;
+
+    const inv = getOrCreateInvoice(invoices, currentInvoiceNo);
+
+    const hdr = extractHeaderFields(chunk);
+    assignHeader(inv.header, hdr);
+
+    const gstRate = findGSTRate(chunk);
+    if (gstRate != null) inv.gstRate = gstRate;
+
+    const items = extractLineItems(chunk);
+    if (items.length) inv.items.push(...items);
+
+    const totals = extractTotals(chunk);
+    assignTotals(inv.totals, totals);
+  }
+
+  const rows = [];
+  invoices.forEach((inv, invNo) => {
+    const st = (inv.header.invoiceStatus || '').toLowerCase();
+    if (excludeDraft && st === 'draft') return;
+
+    if (!hasAllTotals(inv.totals)) computeTotals(inv);
+    if (CONFIG.NORMALIZE_CURRENCY_TO === 'SGD' && inv.totals.currency) inv.totals.currency = 'SGD';
+
+    for (const li of inv.items) {
+      rows.push([
+        inv.header.vendorId || '',
+        inv.header.attentionTo || '',
+        toExcelDate(inv.header.invoiceDate) || inv.header.invoiceDate || '',
+        inv.header.creditTerm || '',
+        inv.header.invoiceNo || invNo,
+        inv.header.relatedInvoiceNo || '',
+        inv.header.invoiceStatus || '',
+        inv.header.instructionId || '',
+        inv.header.headerDescription || '',
+
+        li.lineNo ?? '',
+        li.description || '',
+        toNumber(li.quantity),
+        toNumber(li.unitPrice),
+        toNumber(li.grossEx),
+        li.gstRate != null ? toNumber(li.gstRate) : (inv.gstRate != null ? inv.gstRate : ''),
+        toNumber(li.grossInc),
+
+        inv.totals.currency || '',
+        toNumber(inv.totals.subtotal),
+        toNumber(inv.totals.gst),
+        toNumber(inv.totals.freight),
+        toNumber(inv.totals.total)
+      ]);
+    }
+  });
+
+  return rows;
+}
