@@ -7,7 +7,7 @@
     content="width=device-width, initial-scale=1.0" />
   <title>PDF to Excel Converter</title>
 
-  <!-- PDF.js -->
+  <!-- PDF.js (must match worker version in script.js) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
   <!-- SheetJS (full build) -->
@@ -118,7 +118,6 @@
     .btn-clear { background: #999; color: white; }
     .btn-download { background: #667eea; color: white; display: none; }
 
-    /* Paste area */
     .paste-wrap { margin: 1rem 0 0.5rem 0; }
     .paste-wrap label { display: block; font-weight: 600; margin-bottom: 0.35rem; color: #333; }
     .paste-wrap textarea {
@@ -134,7 +133,6 @@
       color: #222;
     }
 
-    /* Simple spinner */
     .spinner {
       display: inline-block;
       width: 16px;
@@ -198,7 +196,11 @@
     </div>
   </div>
 
-  <!-- App logic -->
-  <script src="script.js"></script>
+  <!-- App logic (add a version query to bust caches on Pages) -->
+  <script>
+    window.BUILD_INFO = 'OptionA-v1.1-2026-02-25';
+    console.info('PDF→Excel build:', window.BUILD_INFO);
+  </script>
+  <script src="script.js?v=2026-02-25-1"></script>
 </body>
 </html>
