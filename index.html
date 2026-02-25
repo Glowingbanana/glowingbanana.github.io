@@ -1,293 +1,211 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PDF to Excel Converter</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.min.js"></script>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0" />
+  <title>PDF to Excel Converter</title>
 
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 1rem;
-        }
+  <!-- PDF.js (match worker version below) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
-        .container {
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
-            max-width: 500px;
-            width: 100%;
-            padding: 2rem;
-        }
+  <!-- SheetJS (full build) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
-        h1 {
-            color: #333;
-            margin-bottom: 0.5rem;
-            text-align: center;
-        }
+  <!-- Tesseract.js (OCR) -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 
-        .subtitle {
-            text-align: center;
-            color: #666;
-            margin-bottom: 2rem;
-            font-size: 0.95rem;
-        }
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      color: #333;
+    }
+    .container {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+      max-width: 680px;
+      width: 100%;
+      padding: 2rem;
+    }
+    h1 { color: #333; margin-bottom: 0.5rem; text-align: center; }
+    .subtitle { text-align: center; color: #666; margin-bottom: 1.25rem; font-size: 0.95rem; }
 
-        .upload-area {
-            border: 2px dashed #667eea;
-            border-radius: 8px;
-            padding: 2rem;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            background: #f9f9f9;
-            margin-bottom: 1.5rem;
-        }
+    .upload-area {
+      border: 2px dashed #667eea;
+      border-radius: 8px;
+      padding: 2rem;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      background: #f9f9f9;
+      margin-bottom: 1rem;
+    }
+    .upload-area:hover { border-color: #764ba2; background: #f0f0f0; }
+    .upload-area.dragover { background: #e8e4f3; border-color: #764ba2; }
+    .upload-area input { display: none; }
 
-        .upload-area:hover {
-            border-color: #764ba2;
-            background: #f0f0f0;
-        }
+    .options {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: .75rem;
+      margin: .75rem 0 1.25rem 0;
+      align-items: center;
+    }
+    .option-item {
+      display: flex;
+      gap: .5rem;
+      align-items: center;
+      font-size: .9rem;
+      color: #444;
+    }
 
-        .upload-area.dragover {
-            background: #e8e4f3;
-            border-color: #764ba2;
-        }
+    .file-info {
+      background: #f7f7f7;
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      margin-bottom: 0.75rem;
+      display: none;
+    }
+    .file-info.show { display: block; }
 
-        .upload-area input {
-            display: none;
-        }
+    .status {
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      margin: 0.75rem 0;
+      display: none;
+      text-align: center;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+    .status.show { display: block; }
+    .status.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    .status.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    .status.loading { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
 
-        .upload-icon {
-            font-size: 3rem;
-            margin-bottom: 0.5rem;
-        }
+    .preview {
+      background: #fafafa;
+      padding: 1rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+      max-height: 240px;
+      overflow-y: auto;
+      border: 1px solid #eaeaea;
+      display: none;
+      white-space: pre-wrap;
+    }
+    .preview.show { display: block; }
 
-        .upload-text {
-            color: #333;
-            font-weight: bold;
-            margin-bottom: 0.25rem;
-        }
+    .button-group {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+      margin-top: 0.5rem;
+    }
+    button {
+      padding: 0.75rem 1rem;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.95rem;
+      transition: all 0.2s ease;
+    }
+    button:disabled { opacity: .6; cursor: not-allowed; }
 
-        .upload-hint {
-            color: #999;
-            font-size: 0.85rem;
-        }
+    .btn-convert { background: #28a745; color: white; grid-column: 1 / -1; }
+    .btn-clear { background: #999; color: white; }
+    .btn-download { background: #667eea; color: white; display: none; }
 
-        .file-info {
-            background: #f0f0f0;
-            padding: 1rem;
-            border-radius: 8px;
-            margin-bottom: 1rem;
-            display: none;
-        }
+    /* Paste area */
+    .paste-wrap { margin: 1rem 0 0.5rem 0; }
+    .paste-wrap label { display: block; font-weight: 600; margin-bottom: 0.35rem; color: #333; }
+    .paste-wrap textarea {
+      width: 100%;
+      height: 140px;
+      padding: 0.75rem;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 0.9rem;
+      resize: vertical;
+      background: #fff;
+      color: #222;
+    }
 
-        .file-info.show {
-            display: block;
-        }
+    /* Simple spinner */
+    .spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(0,0,0,0.15);
+      border-top-color: rgba(0,0,0,0.6);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-right: 8px;
+      vertical-align: -2px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
 
-        .file-name {
-            color: #333;
-            font-weight: bold;
-            margin-bottom: 0.5rem;
-            word-break: break-all;
-        }
-
-        .file-size {
-            color: #666;
-            font-size: 0.9rem;
-        }
-
-        .button-group {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 1rem;
-            margin-bottom: 1rem;
-        }
-
-        button {
-            padding: 0.75rem 1rem;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-weight: bold;
-            font-size: 0.95rem;
-            transition: all 0.3s ease;
-        }
-
-        .btn-convert {
-            background: #28a745;
-            color: white;
-            grid-column: 1 / -1;
-        }
-
-        .btn-convert:hover:not(:disabled) {
-            background: #218838;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
-        }
-
-        .btn-convert:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-        }
-
-        .btn-clear {
-            background: #999;
-            color: white;
-        }
-
-        .btn-clear:hover {
-            background: #777;
-        }
-
-        .btn-download {
-            background: #667eea;
-            color: white;
-        }
-
-        .btn-download:hover {
-            background: #764ba2;
-        }
-
-        .status {
-            padding: 1rem;
-            border-radius: 8px;
-            margin-bottom: 1rem;
-            display: none;
-            text-align: center;
-        }
-
-        .status.show {
-            display: block;
-        }
-
-        .status.success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-
-        .status.error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-
-        .status.loading {
-            background: #d1ecf1;
-            color: #0c5460;
-            border: 1px solid #bee5eb;
-        }
-
-        .spinner {
-            display: inline-block;
-            width: 16px;
-            height: 16px;
-            border: 2px solid rgba(12, 84, 96, 0.3);
-            border-radius: 50%;
-            border-top-color: #0c5460;
-            animation: spin 0.8s linear infinite;
-            margin-right: 0.5rem;
-            vertical-align: middle;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        .preview {
-            background: #f9f9f9;
-            padding: 1rem;
-            border-radius: 8px;
-            margin-bottom: 1rem;
-            max-height: 200px;
-            overflow-y: auto;
-            border: 1px solid #ddd;
-            display: none;
-        }
-
-        .preview.show {
-            display: block;
-        }
-
-        .preview-title {
-            font-weight: bold;
-            color: #333;
-            margin-bottom: 0.5rem;
-        }
-
-        .preview-content {
-            color: #666;
-            font-size: 0.9rem;
-            line-height: 1.4;
-            white-space: pre-wrap;
-            word-break: break-word;
-        }
-
-        @media (max-width: 600px) {
-            .container {
-                padding: 1.5rem;
-            }
-
-            h1 {
-                font-size: 1.5rem;
-            }
-
-            .upload-area {
-                padding: 1.5rem;
-            }
-
-            .button-group {
-                grid-template-columns: 1fr;
-            }
-        }
-    </style>
+    .small-hint { color: #777; font-size: .85rem; margin-top: .25rem; }
+  </style>
 </head>
 <body>
-    <div class="container">
-        <h1>📄➡️📊 PDF to Excel</h1>
-        <p class="subtitle">Convert your PDF text to Excel spreadsheet</p>
+  <div class="container">
+    <h1>📄 ➡️ 📊 PDF to Excel</h1>
+    <p class="subtitle">Convert your PDF (text or scanned images) to an Excel spreadsheet — all in your browser.</p>
 
-        <div class="upload-area" id="uploadArea">
-            <div class="upload-icon">📁</div>
-            <div class="upload-text">Click to upload or drag & drop</div>
-            <div class="upload-hint">PDF files only</div>
-            <input type="file" id="fileInput" accept=".pdf" />
-        </div>
-
-        <div class="file-info" id="fileInfo">
-            <div class="file-name" id="fileName"></div>
-            <div class="file-size" id="fileSize"></div>
-        </div>
-
-        <div class="status" id="status"></div>
-
-        <div class="preview" id="preview">
-            <div class="preview-title">Preview:</div>
-            <div class="preview-content" id="previewContent"></div>
-        </div>
-
-        <div class="button-group">
-            <button class="btn-clear" id="btnClear" onclick="clearFile()">Clear</button>
-            <button class="btn-convert" id="btnConvert" onclick="convertPDF()" disabled>Convert to Excel</button>
-        </div>
-
-        <button class="btn-download" id="btnDownload" onclick="downloadExcel()" style="width: 100%; display: none;">Download Excel File</button>
+    <div class="upload-area" id="uploadArea">
+      <div class="upload-icon" style="font-size: 2rem; margin-bottom: .5rem;">📁</div>
+      <div class="upload-text" style="font-weight: 600;">Click to upload or drag & drop</div>
+      <div class="upload-hint" style="color:#777; margin-top:.25rem;">PDF files only</div>
+      <input type="file" id="fileInput" accept=".pdf,application/pdf" />
     </div>
 
-    <script src="script.js"></script>
+    <div class="options">
+      <label class="option-item">
+        <input type="checkbox" id="forceOCR" />
+        <span>Force OCR (treat all pages as scanned)</span>
+      </label>
+      <div class="option-item" title="If your PDFs are not English, we can load other languages on request.">
+        <span>OCR Language: English (eng)</span>
+      </div>
+    </div>
+
+    <div class="file-info" id="fileInfo">
+      <div id="fileName"></div>
+      <div id="fileSize" class="small-hint"></div>
+    </div>
+
+    <div class="paste-wrap">
+      <label for="textInput">Or paste text to convert directly:</label>
+      <textarea id="textInput" placeholder="Paste text here if you don't have a PDF..."></textarea>
+      <div class="small-hint">If no PDF is selected, clicking "Convert to Excel" will convert the pasted text.</div>
+    </div>
+
+    <div class="status" id="status"></div>
+
+    <div class="preview" id="preview">
+      <div style="font-weight:700; margin-bottom:.5rem;">Preview:</div>
+      <div id="previewContent"></div>
+    </div>
+
+    <div class="button-group">
+      <button class="btn-clear" id="btnClear" onclick="clearFile()">Clear</button>
+      <button class="btn-convert" id="btnConvert" onclick="convertPDF()" disabled>Convert to Excel</button>
+      <button class="btn-download" id="btnDownload" onclick="downloadExcel()">Download Excel File</button>
+    </div>
+  </div>
+
+  <!-- App logic -->
+  <script src="script.js"></script>
 </body>
 </html>
