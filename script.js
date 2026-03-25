@@ -1,6 +1,6 @@
 /* ========= Config ========= */
 const CONFIG = {
-  NORMALIZE_CURRENCY_TO: null, // set to 'SGD' to map "Singapore Dollar" -> "SGD"
+  NORMALIZE_CURRENCY_TO: null, // set to 'SGD' if you want "Singapore Dollar" normalized
   DATE_FORMAT: 'dd/mm/yyyy',
   EXCLUDE_DRAFT_DEFAULT: false,
   MIN_DIGITAL_TEXT_LEN: 20,
@@ -10,7 +10,7 @@ const CONFIG = {
 
 /* ========= Globals ========= */
 let selectedFile = null;
-let extractedDataRaw = '';   // for preview
+let extractedDataRaw = '';   // preview only
 let exportRows = [];         // final rows (one per line item)
 let ocrReady = false;
 
@@ -37,7 +37,7 @@ const btnDownload = document.getElementById('btnDownload');
 
 const textInput  = document.getElementById('textInput');
 
-/* ========= OCR Worker ========= */
+/* ========= Tesseract OCR Worker ========= */
 const ocrWorker = Tesseract.createWorker({
   workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
   corePath:   'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.0.0/tesseract-core.wasm.js',
@@ -163,15 +163,15 @@ async function convertSelectedPDF(){
       // Header
       assignHeader(inv.header, extractHeaderFields(norm));
 
-      // Optional GST rate in text
+      // Optional GST rate in text (not used for per-line calc, but kept)
       const gstRate = findGSTRate(norm);
       if (gstRate != null) inv.gstRate = gstRate;
 
-      // Line items (using your true pattern)
+      // Line items (your real pattern)
       const items = extractLineItems(norm);
       if (items.length) inv.items.push(...items);
 
-      // Totals (currency, subtotal, total GST)
+      // Totals (currency, subtotal, total GST, freight if present)
       assignTotals(inv.totals, extractTotals(norm));
     }
 
@@ -207,7 +207,7 @@ async function convertSelectedPDF(){
           toNumber(li.quantity),
           toNumber(li.unitPrice),
           toNumber(li.grossEx),
-          li.gstPercent != null ? toNumber(li.gstPercent) : 0,  // "GST @ 9%" column per your header
+          toNumber(li.gstAmount),              // GST @ 9% => amount per line (Inc − Ex)
           toNumber(li.grossInc),
 
           // Totals (invoice-level, repeated)
@@ -252,7 +252,7 @@ function downloadExcel(){
   const ws = XLSX.utils.aoa_to_sheet([headers, ...exportRows]);
   ws['!cols'] = [
     {wch:12},{wch:18},{wch:12},{wch:10},{wch:18},{wch:18},{wch:12},{wch:20},{wch:70},
-    {wch:6},{wch:70},{wch:10},{wch:12},{wch:16},{wch:8},{wch:18},{wch:16},{wch:20},{wch:18}
+    {wch:6},{wch:70},{wch:10},{wch:12},{wch:16},{wch:16},{wch:18},{wch:16},{wch:20},{wch:18}
   ];
   ws['!freeze'] = { xSplit:0, ySplit:1 };
   XLSX.utils.book_append_sheet(wb, ws, 'Invoice Lines');
@@ -278,14 +278,15 @@ function toNumber(v){
   const n = parseFloat(s);
   return Number.isFinite(n) ? n : '';
 }
-function toExcelDate(dmy){
-  if (!dmy || typeof dmy !== 'string') return '';
-  const m = dmy.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+function toExcelDate(s){
+  if (!s || typeof s !== 'string') return '';
+  // Match dd/mm/yyyy or d/m/yyyy
+  const m = s.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
   if (!m) return '';
   let [, d, mo, y] = m;
-  if (y.length === 2) y = '20' + y;
-  const dt = new Date(parseInt(y,10), parseInt(mo,10)-1, parseInt(d,10));
-  return isNaN(dt.getTime()) ? '' : dt;
+  if (y.length === 2) y = '20' + y; // assume 20xx for 2-digit years
+  const date = new Date(parseInt(y,10), parseInt(mo,10)-1, parseInt(d,10));
+  return isNaN(date.getTime()) ? '' : date;
 }
 function getOrCreateInvoice(map, invoiceNo){
   if (!map.has(invoiceNo)){
@@ -294,88 +295,98 @@ function getOrCreateInvoice(map, invoiceNo){
   return map.get(invoiceNo);
 }
 
-/* ---- Header extraction (labels seen across your PDF) ---- */
-function findInvoiceNo(text){ const m = text.match(/Invoice\s*No\s*:\s*([A-Z0-9-]+)/i); return m ? m[1] : null; }
+/* ---- Header extraction (tight boundaries) ---- */
+function findInvoiceNo(text){
+  const m = text.match(/Invoice\s*No\s*:\s*([A-Z0-9-]+)/i);
+  return m ? m[1] : null;
+}
 function extractHeaderFields(text){
   const out = {};
-  const id  = text.match(/Vendor\s*ID\s*:\s*([A-Z0-9]+)/i);             if (id)  out.vendorId = id[1];
-  const att = text.match(/Attention\s*To\s*:\s*([A-Za-z0-9 ,.'()\/-]+)/i); if (att) out.attentionTo = att[1].trim();
-  const dt  = text.match(/Invoice\s*Date\s*:\s*([0-3]?\d[\/\-][01]?\d[\/\-]\d{2,4})/i); if (dt) out.invoiceDate = dt[1];
-  const term= text.match(/Credit\s*Term\s*:\s*([A-Za-z0-9 ]+)/i);       if (term) out.creditTerm = term[1].trim();
-  const inv = text.match(/Invoice\s*No\s*:\s*([A-Z0-9-]+)/i);           if (inv) out.invoiceNo = inv[1];
-  const rel = text.match(/Related\s*Invoice\s*No\s*:\s*([A-Z0-9-]+)/i); if (rel) out.relatedInvoiceNo = rel[1];
-  const st  = text.match(/Invoice\s*Status\s*:\s*([A-Za-z]+)/i);        if (st)  out.invoiceStatus = st[1];
-  const ins = text.match(/Invoicing\s*Instruction\s*ID\s*:\s*([A-Z0-9-]+)/i); if (ins) out.instructionId = ins[1];
-  // Header Description until a strong boundary
-  const desc= text.match(/Description\s*:\s*(.+?)(?=\s(?:No\.\s|Currency\s*:|Invoice\s*Amount\s*Summary|Sub\s*Total|Total\s*GST|Freight\s*Amount|Total\s*Invoice\s*Amount|$))/i);
+  const NEXT = '(?:Invoice\\s*Date|Credit\\s*Term|Invoice\\s*No|Related\\s*Invoice\\s*No|Invoice\\s*Status|Invoicing\\s*Instruction\\s*ID|Description)\\s*:';
+
+  const id  = text.match(/Vendor\s*ID\s*:\s*([A-Z0-9]+)/i); if (id) out.vendorId = id[1];
+
+  const att = text.match(new RegExp(`Attention\\s*To\\s*:\\s*([^:]+?)(?=\\s${NEXT})`, 'i'));
+  if (att) out.attentionTo = att[1].trim();
+
+  const dt  = text.match(/Invoice\s*Date\s*:\s*([0-3]?\d[\/\-][01]?\d[\/\-]\d{2,4})/i);
+  if (dt) out.invoiceDate = dt[1];
+
+  const term= text.match(new RegExp(`Credit\\s*Term\\s*:\\s*([^:]+?)(?=\\s${NEXT})`, 'i'));
+  if (term) out.creditTerm = term[1].trim();
+
+  const inv = text.match(/Invoice\s*No\s*:\s*([A-Z0-9-]+)/i);
+  if (inv) out.invoiceNo = inv[1];
+
+  const rel = text.match(new RegExp(`Related\\s*Invoice\\s*No\\s*:\\s*([^:]+?)(?=\\s${NEXT})`, 'i'));
+  if (rel) out.relatedInvoiceNo = rel[1]?.trim();
+
+  const st  = text.match(/Invoice\s*Status\s*:\s*([A-Za-z]+)/i);
+  if (st) out.invoiceStatus = st[1];
+
+  const ins = text.match(/Invoicing\s*Instruction\s*ID\s*:\s*([A-Z0-9-]+)/i);
+  if (ins) out.instructionId = ins[1];
+
+  const desc= text.match(/Description\s*:\s*(.+?)(?=\s(?:No\.|Currency\s*:|Invoice\s*Amount\s*Summary|Sub\s*Total|Total\s*GST|Freight\s*Amount|Total\s*Invoice\s*Amount|Vendor\s*ID\s*:|Attention\s*To\s*:|$))/i);
   if (desc) out.headerDescription = desc[1].trim();
+
   return out;
 }
 function assignHeader(target, src){ if (!src) return; for (const k of Object.keys(src)){ if (!target[k]) target[k]=src[k]; } }
 function findGSTRate(text){ const m = text.match(/GST\s*@\s*(\d{1,2})\s*%/i); return m ? parseFloat(m[1]) : null; }
 
-/* ---- Line items extraction (your real pattern) ----
-   Pattern derived from your sample workbook rows: lineNo, description,
-   unitPrice, 0, quantity, grossEx, grossInc.  [1](https://cognizantonline-my.sharepoint.com/personal/2453742_cognizant_com/_layouts/15/Doc.aspx?sourcedoc=%7B3B882CD4-232D-46B1-B05A-F5913F2CFDE7%7D&file=Vendors@gov-(29%20Sep%2025)-1-25_converted.xlsx&action=default&mobileredirect=true)
-   We also include a fallback that accepts a GST amount between grossEx and grossInc.
+/* ---- Line items extraction (fault-tolerant) ----
+   Matches:
+   <No> <Description> <UnitPrice> [0] <Quantity> <GrossEx> [GSTAmt] <GrossInc>
+   GST amount per line = GrossInc - GrossEx (if GSTAmt absent)
 */
 function extractLineItems(text){
   const items = [];
-
-  // Primary (unitPrice with 3–4 decimals, a literal 0, quantity with 5 decimals, ex, inc)
-  const rxPrimary = /(?:^|\s)(\d{1,3})\s+(.+?)\s+([0-9][0-9,]*\.\d{3,4})\s+0(?:\.0+)?\s+([0-9]+\.\d{5})\s+([0-9][0-9,]*\.\d{2})\s+([0-9][0-9,]*\.\d{2})(?=\s|$)/gi;
-
-  // Fallback (some layouts include GST amount; quantity still has 5 decimals)
-  const rxFallback = /(?:^|\s)(\d{1,3})\s+(.+?)\s+([0-9][0-9,]*\.\d{2,4})\s+([0-9]+\.\d{5})\s+([0-9][0-9,]*\.\d{2})\s+([0-9][0-9,]*\.\d{2})\s+([0-9][0-9,]*\.\d{2})(?=\s|$)/gi;
+  const rx = /(?:^|\s)(\d{1,3})\s+(.+?)\s+([0-9][0-9,]*\.\d{2,5})\s+(?:0(?:\.0+)?\s+)?([0-9]+(?:\.\d{2,5})?)\s+([0-9][0-9,]*\.\d{2})(?:\s+([0-9][0-9,]*\.\d{2}))?\s+([0-9][0-9,]*\.\d{2})(?=\s|$)/gi;
 
   let m;
-  while ((m = rxPrimary.exec(text)) !== null){
-    const lineNo = parseInt(m[1],10);
+  while ((m = rx.exec(text)) !== null){
+    const lineNo      = parseInt(m[1],10);
     const description = m[2].trim();
-    const unitPrice = m[3];
-    const quantity  = m[4];
-    const grossEx   = m[5];
-    const grossInc  = m[6];
+    const unitPrice   = m[3];
+    const quantity    = m[4];
+    const grossEx     = m[5];
+    const maybeGST    = m[6]; // optional GST amount
+    const grossInc    = m[7];
+    if (description.length < 3) continue;
 
-    // GST % column: your sheet header reads "GST @ 9%".
-    // Keep 0 for this column (as seen in your sample rows) and compute if needed.
-    const gstPercent = 0;
-    if (description.length >= 3){
-      items.push({ lineNo, description, quantity, unitPrice, grossEx, grossInc, gstPercent });
+    let gstAmount = '';
+    const ex  = toNumber(grossEx);
+    const inc = toNumber(grossInc);
+    if (maybeGST) {
+      gstAmount = toNumber(maybeGST);
+    } else if (Number.isFinite(ex) && Number.isFinite(inc)) {
+      gstAmount = +(inc - ex).toFixed(2);
     }
+
+    items.push({ lineNo, description, quantity, unitPrice, grossEx, gstAmount: gstAmount===''?'':gstAmount, grossInc });
   }
-
-  // If nothing matched, try fallback
-  if (!items.length){
-    let f;
-    while ((f = rxFallback.exec(text)) !== null){
-      const lineNo = parseInt(f[1],10);
-      const description = f[2].trim();
-      const unitPrice = f[3];
-      const quantity  = f[4];
-      const grossEx   = f[5];
-      const gstAmt    = f[6];
-      const grossInc  = f[7];
-
-      // Compute GST% ~= (gstAmt / grossEx)*100
-      let gstPercent = null;
-      const ex = toNumber(grossEx), g = toNumber(gstAmt);
-      if (Number.isFinite(ex) && ex>0 && Number.isFinite(g)){
-        gstPercent = Math.round((g/ex)*1000)/10;
-      }
-      items.push({ lineNo, description, quantity, unitPrice, grossEx, grossInc, gstPercent });
-    }
-  }
-
   return items;
 }
 
-/* ---- Totals extraction (invoice-level) ---- */
+/* ---- Totals extraction ---- */
 function extractTotals(text){
   const out = {};
-  const cur = text.match(/Currency\s*:\s*([A-Za-z ]+)/i);                    if (cur) out.currency = cur[1].trim();
-  const sub = text.match(/Sub\s*Total\s*\(Excluding\s*GST\)\s*:\s*([0-9][0-9,]*\.\d{2})/i); if (sub) out.subtotal = sub[1];
-  const gst = text.match(/Total\s*GST\s*Payable\s*:\s*([0-9][0-9,]*\.\d{2})/i);             if (gst) out.gst = gst[1];
+  const cur = text.match(/Currency\s*:\s*([A-Za-z ]+?)(?=\s+Sub\s*Total|\s*$)/i);
+  if (cur) out.currency = cur[1].trim();
+
+  const sub = text.match(/Sub\s*Total\s*\(Excluding\s*GST\)\s*:\s*([0-9][0-9,]*\.\d{2})/i);
+  if (sub) out.subtotal = sub[1];
+
+  const gst = text.match(/Total\s*GST\s*Payable\s*:\s*([0-9][0-9,]*\.\d{2})/i);
+  if (gst) out.gst = gst[1];
+
+  const fr  = text.match(/Freight\s*Amount\s*:\s*([0-9][0-9,]*\.\d{2})/i);
+  if (fr) out.freight = fr[1];
+
+  const tot = text.match(/Total\s*Invoice\s*Amount\s*:\s*([0-9][0-9,]*\.\d{2})/i);
+  if (tot) out.total = tot[1];
+
   return out;
 }
 function assignTotals(target, src){ if (!src) return; for(const k of Object.keys(src)){ if (!target[k]) target[k]=src[k]; } }
@@ -421,8 +432,7 @@ async function extractRowsFromText(text, { excludeDraft }){
         inv.header.invoiceStatus||'', inv.header.instructionId||'', inv.header.headerDescription||'',
         li.lineNo??'', li.description||'',
         toNumber(li.quantity), toNumber(li.unitPrice), toNumber(li.grossEx),
-        li.gstPercent!=null ? toNumber(li.gstPercent) : 0,
-        toNumber(li.grossInc),
+        toNumber(li.gstAmount), toNumber(li.grossInc),
         inv.totals.currency||'', toNumber(inv.totals.subtotal), toNumber(inv.totals.gst)
       ]);
     }
