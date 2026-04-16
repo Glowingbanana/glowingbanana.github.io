@@ -151,7 +151,7 @@ async function convertPDF() {
 
             /* ── Skip non-invoice pages ── */
             if (!looksLikeInvoice(pageText)) {
-                console.info(`Page ${i}: skipped (no invoice markers found)`);
+                console.log(`Page ${i}: skipped (no invoice markers found)`);
                 continue;
             }
 
@@ -234,12 +234,12 @@ function parsePage(text) {
     const t = text.replace(/\u00A0/g, ' ').replace(/[ \t]+/g, ' ');
 
     return [
-        /* 01 */ grab(t, /Vendor\s*ID\s*[:\-]\s*([^\n\r]+)/i),
+        /* 01 */ grab(t, /Vendor\s*ID\s*[:\-]\s*([A-Z0-9]+)/i),
         /* 02 */ grab(t, /Attention\s*To\s*[:\-]\s*([^\n\r]+)/i),
         /* 03 */ toExcelDate(grab(t, /Invoice\s*Date\s*[:\-]\s*([\d\/\-]+)/i)),
         /* 04 */ grab(t, /Credit\s*Term\s*[:\-]\s*([^\n\r]+)/i),
         /* 05 */ grab(t, /Invoice\s*No\s*[:\-]\s*([A-Z0-9\/\-]+)/i),
-        /* 06 */ grab(t, /Related\s*Invoice\s*No\s*[:\-]\s*([^\n\r]*)/i) || '',
+        /* 06 */ grab(t, /Related\s*Invoice\s*No\s*[:\-]\s*([A-Z0-9\/\-]+)(?!\s*Invoice)/i) || '',
         /* 07 */ grab(t, /Invoice\s*Status\s*[:\-]\s*([A-Za-z]+)/i),
         /* 08 */ grab(t, /Invoicing\s*Instruction\s*(?:ID)?\s*[:\-]\s*([^\n\r]+)/i),
         /* 09 */ grabHeaderDescription(t),
