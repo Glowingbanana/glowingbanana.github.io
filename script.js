@@ -389,25 +389,26 @@ async function downloadExcel() {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Invoice Lines');
 
-    /* ── Auto column widths ── */
+    /* ── Set column widths (no header here, we add manually) ── */
     ws.columns = headers.map((h, i) => {
         const dataMax = exportRows.reduce((max, row) => {
             const v = row[i] != null ? String(row[i]) : '';
             return Math.max(max, v.length);
         }, 0);
-        return { header: h, key: `col${i}`, width: Math.max(h.length, dataMax) + 4 };
+        return { key: 'col' + i, width: Math.max(h.length, dataMax) + 4 };
     });
 
-    /* ── Style header row ── */
-    const headerRow = ws.getRow(1);
+    /* ── Add header row manually so we can style it ── */
+    const headerRow = ws.addRow(headers);
     headerRow.height = 30;
-    headerRow.eachCell(cell => {
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFBDD7EE' } };
-        cell.font = { bold: true, color: { argb: 'FF1F3864' }, size: 11 };
+    headerRow.eachCell({ includeEmpty: true }, cell => {
+        cell.value = headers[cell.col - 1];
+        cell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFBDD7EE' } };
+        cell.font  = { bold: true, color: { argb: 'FF1F3864' }, size: 11, name: 'Calibri' };
         cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
         cell.border = {
             top:    { style: 'thin', color: { argb: 'FFA0C4E2' } },
-            bottom: { style: 'thin', color: { argb: 'FFA0C4E2' } },
+            bottom: { style: 'medium', color: { argb: 'FF2E75B6' } },
             left:   { style: 'thin', color: { argb: 'FFA0C4E2' } },
             right:  { style: 'thin', color: { argb: 'FFA0C4E2' } }
         };
@@ -423,20 +424,26 @@ async function downloadExcel() {
             if (isAlt) {
                 cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F8FD' } };
             }
+            cell.border = {
+                bottom: { style: 'hair', color: { argb: 'FFD9E1F2' } },
+                right:  { style: 'hair', color: { argb: 'FFD9E1F2' } }
+            };
         });
     });
 
     /* ── Freeze header row ── */
     ws.views = [{ state: 'frozen', xSplit: 0, ySplit: 1, topLeftCell: 'A2', activeCell: 'A2' }];
 
-    /* ── Export ── */
-    const buf = await wb.xlsx.writeBuffer();
+    /* ── Export as blob ── */
+    const buf  = await wb.xlsx.writeBuffer();
     const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
     a.download = selectedFile.name.replace(/\.pdf$/i, '') + '.xlsx';
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
     showStatus('✅ Excel file downloaded!', 'success');
 }
