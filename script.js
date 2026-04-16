@@ -282,12 +282,13 @@ function grabHeaderDescription(text) {
  * or "Invoice Status" — all of which we reject, returning blank instead.
  */
 function grabRelatedInvoiceNo(text) {
-    // Extract everything between "Related Invoice No :" and "Invoice Status"
-    const m = text.match(/Related\s*Invoice\s*No\s*[:\-]\s*(.*?)(?=\s*Invoice\s*Status)/is);
+    const m = text.match(/Related\s*Invoice\s*No\s*[:\-]\s*(.*?)(?=Invoice\s*Status|Invoice\s*No\b|$)/is);
     if (!m) return '';
     const val = m[1].replace(/\s+/g, ' ').trim();
-    // Must start with a letter to be a real invoice number (e.g. MA311-0000106287)
-    if (!val || !/^[A-Za-z]/.test(val)) return '';
+    // If empty or contains "Invoice" keyword it means field was blank
+    if (!val || /Invoice/i.test(val)) return '';
+    // Must match a real invoice number pattern like MA311-0000106287
+    if (!/^[A-Za-z]{2}[A-Za-z0-9\-]+$/.test(val)) return '';
     return val;
 }
 
