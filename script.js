@@ -19,8 +19,8 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
 /* ========= DOM ========= */
 const uploadArea    = document.getElementById('uploadArea');
 const fileInput     = document.getElementById('fileInput');
-const forceOCRCb    = document.getElementById('forceOCR');
-const excludeDraftCb= document.getElementById('excludeDraft');
+const forceOCRCb    = document.getElementById('forceOCR') || { checked: false };
+const excludeDraftCb= document.getElementById('excludeDraft') || { checked: false };
 const statusEl      = document.getElementById('status');
 const fileInfo      = document.getElementById('fileInfo');
 const fileNameEl    = document.getElementById('fileName');
@@ -100,8 +100,7 @@ function clearFile() {
     btnConvert.disabled = true;
     btnDownload.style.display = 'none';
     fileInput.value = '';
-    const ta = document.getElementById('textInput');
-    if (ta) ta.value = '';
+    // textInput removed
     statusEl.className = 'status';
 }
 
