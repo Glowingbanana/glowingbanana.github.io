@@ -6,7 +6,7 @@
     <title>Invoice PDF → Excel</title>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -559,7 +559,7 @@
     <div class="button-group">
         <button class="btn-clear" id="btnClear" onclick="clearFile()">Clear</button>
         <button class="btn-convert" id="btnConvert" onclick="convertPDF()" disabled>Convert to Excel</button>
-        <button class="btn-download" id="btnDownload" onclick="downloadExcel()">⬇ Download Excel</button>
+        <button class="btn-download" id="btnDownload" onclick="downloadExcel().catch(e => showStatus('Error: ' + e.message, 'error'))">⬇ Download Excel</button>
     </div>
 
     <div class="footer">Handles digital PDFs · Scanned PDFs (OCR) · Split pages</div>
