@@ -282,13 +282,13 @@ function grabHeaderDescription(text) {
  * or "Invoice Status" — all of which we reject, returning blank instead.
  */
 function grabRelatedInvoiceNo(text) {
-    const m = text.match(/Related\s*Invoice\s*No\s*[:\-]\s*([^\n\r]*)/i);
+    // Extract everything between "Related Invoice No :" and "Invoice Status"
+    const m = text.match(/Related\s*Invoice\s*No\s*[:\-]\s*(.*?)(?=\s*Invoice\s*Status)/is);
     if (!m) return '';
-    const val = m[1].trim();
-    // Must start with a letter to be a valid invoice number (e.g. MA311-...)
+    const val = m[1].replace(/\s+/g, ' ').trim();
+    // Must start with a letter to be a real invoice number (e.g. MA311-0000106287)
     if (!val || !/^[A-Za-z]/.test(val)) return '';
-    // Stop if "Invoice" keyword bleeds onto same line
-    return val.split(/\s+Invoice\b/i)[0].trim();
+    return val;
 }
 
 /**
