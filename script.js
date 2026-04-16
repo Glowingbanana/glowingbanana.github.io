@@ -149,6 +149,29 @@ async function convertPDF() {
 
             extractedDataRaw += `\n\n--- Page ${i} ---\n${pageText}`;
 
+            /* ── Check if this is a continuation page (has totals but no invoice header) ── */
+            const hasTotals   = /Sub\s*Total|Total\s*GST|Freight\s*Amount|Total\s*Invoice\s*Amount/i.test(pageText);
+            const hasHeader   = /Vendor\s*ID|Invoice\s*No/i.test(pageText);
+            const isContinuation = hasTotals && !hasHeader && exportRows.length > 0;
+
+            if (isContinuation) {
+                /* Merge totals into the last row */
+                const lastRow = exportRows[exportRows.length - 1];
+                const currency = grab(pageText, /Currency\s*[:\-]\s*([^\n\r]+)/i);
+                const subtotal = toNumber(grab(pageText, /Sub\s*Total\s*\(?Excluding\s*GST\)?\s*[:\-]\s*([0-9,\.]+)/i));
+                const gst      = toNumber(grab(pageText, /Total\s*GST\s*Payable\s*[:\-]\s*([0-9,\.]+)/i));
+                const freight  = toNumber(grab(pageText, /Freight\s*Amount\s*[:\-]\s*([0-9,\.]+)/i));
+                const total    = toNumber(grab(pageText, /Total\s*Invoice\s*Amount\s*[:\-]\s*([0-9,\.]+)/i));
+                /* Columns: 16=currency, 17=subtotal, 18=gst, 19=freight, 20=total */
+                if (currency) lastRow[16] = currency;
+                if (subtotal !== '') lastRow[17] = subtotal;
+                if (gst      !== '') lastRow[18] = gst;
+                if (freight  !== '') lastRow[19] = freight;
+                if (total    !== '') lastRow[20] = total;
+                console.log(`Page ${i}: continuation — totals merged into previous row`);
+                continue;
+            }
+
             /* ── Skip non-invoice pages ── */
             if (!looksLikeInvoice(pageText)) {
                 console.log(`Page ${i}: skipped (no invoice markers found)`);
