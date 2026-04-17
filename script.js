@@ -142,7 +142,7 @@ async function convertPDF() {
 
             extractedDataRaw += `\n\n--- Page ${i} ---\n${pageText}`;
 
-            /* ── Check if this is a continuation page (has totals but no invoice header) ── */
+            /* ── Check if this is a continuation page ── */
             const hasTotals      = /Sub\s*Total|Total\s*GST|Freight\s*Amount|Total\s*Invoice\s*Amount/i.test(pageText);
             const hasHeader      = /Vendor\s*ID|Invoice\s*No/i.test(pageText);
             const isContinuation = hasTotals && !hasHeader && exportRows.length > 0;
@@ -249,7 +249,7 @@ function parsePage(text) {
     const t = text.replace(/\u00A0/g, ' ').replace(/[ \t]+/g, ' ');
 
     return [
-        /* 01 */ grab(t, new RegExp(`Vendor\\s*ID${SEP}([A-Z0-9]+?)(?=\\s+Attention|\\s*\\n|\\s*$)`, 'im')),
+        /* 01 */ grabVendorID(t),
         /* 02 */ grab(t, new RegExp(`Attention\\s*To${SEP}([^\\n\\r]+?)(?=\\s*Invoice\\s*Date|\\s*$)`, 'i')),
         /* 03 */ toExcelDate(grab(t, new RegExp(`Invoice\\s*Date${SEP}([\\d\\/\\-]+)`, 'i'))),
         /* 04 */ grab(t, new RegExp(`Credit\\s*Term${SEP}([^\\n\\r]+?)(?=\\s*Invoice\\s*No|\\s*$)`, 'i')),
@@ -265,7 +265,7 @@ function parsePage(text) {
         /* 14 */ toNumber(grabTableCol(t, 'grossex')),
         /* 15 */ toNumber(grabTableCol(t, 'gst')),
         /* 16 */ toNumber(grabTableCol(t, 'grossinc')),
-        /* 17 */ grab(t, new RegExp(`Currency${SEP}([^\\n\\r]+)`, 'i')),
+        /* 17 */ grab(t, new RegExp(`Currency\w*${SEP}([^\\n\\r]+)`, 'i')),
         /* 18 */ toNumber(grab(t, new RegExp(`Sub\\s*Total\\s*\\(?Excluding\\s*GST\\)?${SEP}([\\d\\s,\\.]+)`, 'i'))),
         /* 19 */ toNumber(grab(t, new RegExp(`Total\\s*GST\\s*Payable${SEP}([\\d\\s,\\.]+)`, 'i'))),
         /* 20 */ toNumber(grab(t, new RegExp(`Freight\\s*Amount${SEP}([\\d\\s,\\.]+)`, 'i'))),
@@ -280,9 +280,20 @@ function grab(text, regex) {
     return m ? m[1].trim() : '';
 }
 
+/**
+ * Vendor ID — OCR sometimes inserts a stray digit between the label and value.
+ * e.g. "Vendor ID 1 200202851H" — skip any leading single digit/noise.
+ */
+function grabVendorID(text) {
+    const m = text.match(/Vendor\s*ID\s*(?:\s*[:\-]\s*|\s+)(?:\d\s+)?([A-Z0-9]{5,})(?=\s+Attention|\s*\n|\s*$)/im);
+    return m ? m[1].trim() : '';
+}
+
 function grabHeaderDescription(text) {
     const headerSection = text.split(/\bNo\.?\s+Description\b/i)[0] || text;
-    return grab(headerSection, /\bDescription\s*(?:\s*[:\-]\s*|\s+)([^\n\r]+)/i);
+    /* Also handle OCR garbling the table header — split at line item start */
+    const cleanSection = headerSection.split(/^\s*\d{1,3}\s+[\[\(A-Za-z]/m)[0] || headerSection;
+    return grab(cleanSection, /\bDescription\s*(?:\s*[:\-]\s*|\s+)(?:\d\s+)?([^\n\r]+)/i);
 }
 
 function grabRelatedInvoiceNo(text) {
@@ -314,11 +325,28 @@ function grabLineDescription(text) {
     return m2 ? m2[1].trim() : '';
 }
 
+/**
+ * getTableSection — finds the line item table body.
+ * Primary: looks for "No. Description" header row.
+ * Fallback: when OCR garbles the header, find the first line that
+ *           looks like a line item (digit + bracket/letter text).
+ */
 function getTableSection(text) {
+    const end = text.search(/Invoice\s*Amount\s*Summary/i);
+
+    /* Primary: clean digital PDF header */
     const start = text.search(/\bNo\.?\s+Description\b/i);
-    if (start === -1) return '';
-    const end   = text.search(/Invoice\s*Amount\s*Summary/i);
-    return end > start ? text.slice(start, end) : text.slice(start);
+    if (start !== -1) {
+        return end > start ? text.slice(start, end) : text.slice(start);
+    }
+
+    /* Fallback: OCR garbled header — find first line item row directly */
+    const fallback = text.search(/^\s*\d{1,3}\s+[\[\(A-Za-z]/m);
+    if (fallback !== -1) {
+        return end > fallback ? text.slice(fallback, end) : text.slice(fallback);
+    }
+
+    return '';
 }
 
 function grabTableCol(text, col) {
