@@ -10,7 +10,7 @@ const CONFIG = {
 let selectedFile = null;
 let extractedDataRaw = '';
 let exportRows = [];
-let ocrReady = false;
+let ocrWorker = null;
 
 /* ========= PDF.js Worker ========= */
 pdfjsLib.GlobalWorkerOptions.workerSrc =
@@ -31,24 +31,19 @@ const btnConvert    = document.getElementById('btnConvert');
 const btnDownload   = document.getElementById('btnDownload');
 
 /* ========= OCR ========= */
-const ocrWorker = Tesseract.createWorker({
-    workerPath : 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
-    corePath   : 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.0.0/tesseract-core.wasm.js',
-    langPath   : 'https://tessdata.projectnaptha.com/4.0.0',
-    logger: m => {
-        if (m?.status && typeof m.progress === 'number') {
-            showStatus(`OCR: ${m.status} ${(m.progress * 100).toFixed(0)}%`, 'loading');
-        }
-    }
-});
-
 async function ensureOCR() {
-    if (ocrReady) return;
+    if (ocrWorker) return;
     showStatus('Loading OCR engine…', 'loading');
-    await ocrWorker.load();
-    await ocrWorker.loadLanguage('eng');
-    await ocrWorker.initialize('eng');
-    ocrReady = true;
+    ocrWorker = await Tesseract.createWorker('eng', 1, {
+        workerPath : 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
+        corePath   : 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.0.0/tesseract-core.wasm.js',
+        langPath   : 'https://tessdata.projectnaptha.com/4.0.0',
+        logger: m => {
+            if (m?.status && typeof m.progress === 'number') {
+                showStatus(`OCR: ${m.status} ${(m.progress * 100).toFixed(0)}%`, 'loading');
+            }
+        }
+    });
 }
 
 /* ========= UI Events ========= */
@@ -100,7 +95,6 @@ function clearFile() {
     btnConvert.disabled = true;
     btnDownload.style.display = 'none';
     fileInput.value = '';
-    // textInput removed
     statusEl.className = 'status';
 }
 
@@ -161,7 +155,6 @@ async function convertPDF() {
                 const gst      = toNumber(grab(pageText, /Total\s*GST\s*Payable\s*[:\-]\s*([0-9,\.]+)/i));
                 const freight  = toNumber(grab(pageText, /Freight\s*Amount\s*[:\-]\s*([0-9,\.]+)/i));
                 const total    = toNumber(grab(pageText, /Total\s*Invoice\s*Amount\s*[:\-]\s*([0-9,\.]+)/i));
-                /* Columns: 16=currency, 17=subtotal, 18=gst, 19=freight, 20=total */
                 if (currency) lastRow[16] = currency;
                 if (subtotal !== '') lastRow[17] = subtotal;
                 if (gst      !== '') lastRow[18] = gst;
@@ -209,16 +202,11 @@ async function convertPDF() {
 }
 
 /* ========= BUILD PAGE TEXT ========= */
-/*
- * PDF.js returns items with x/y positions. We reconstruct lines by grouping
- * items with similar Y coordinates (within 5px), then sorting each line by X.
- * This handles broken/split-column layouts far better than a flat join.
- */
 function buildPageText(items) {
     if (!items || !items.length) return '';
 
     const lines = [];
-    const YTOL  = 5; // px tolerance for same-line grouping
+    const YTOL  = 5;
 
     for (const item of items) {
         const str = (item.str || '').replace(/\u00A0/g, ' ');
@@ -237,7 +225,6 @@ function buildPageText(items) {
         if (!matched) lines.push({ y, parts: [{ x, str }] });
     }
 
-    /* Sort lines top→bottom, parts left→right */
     lines.sort((a, b) => b.y - a.y);
     return lines
         .map(l => l.parts.sort((a, b) => a.x - b.x).map(p => p.str).join(' '))
@@ -252,7 +239,6 @@ function looksLikeInvoice(text) {
 
 /* ========= PARSE ONE PAGE → ONE ROW ========= */
 function parsePage(text) {
-    /* Normalise whitespace but preserve newlines for multi-line fields */
     const t = text.replace(/\u00A0/g, ' ').replace(/[ \t]+/g, ' ');
 
     return [
@@ -282,78 +268,45 @@ function parsePage(text) {
 
 /* ========= FIELD GRABBERS ========= */
 
-/** Generic: grab first capture group, trimmed */
 function grab(text, regex) {
     const m = text.match(regex);
     return m ? m[1].trim() : '';
 }
 
-/**
- * Header Description — the label "Description :" that appears ABOVE the table.
- * We grab it by looking for Description before the line-item table header (No.).
- */
 function grabHeaderDescription(text) {
-    /* Split at the table header row so we only look in the header section */
     const headerSection = text.split(/\bNo\.?\s+Description\b/i)[0] || text;
     return grab(headerSection, /\bDescription\s*[:\-]\s*([^\n\r]+)/i);
 }
 
-/**
- * Related Invoice No — only return a value if it starts with a letter (real invoice no).
- * When the field is blank, the next text on that line is either empty, a digit fragment,
- * or "Invoice Status" — all of which we reject, returning blank instead.
- */
 function grabRelatedInvoiceNo(text) {
     const m = text.match(/Related\s*Invoice\s*No\s*[:\-]\s*(.*?)(?=Invoice\s*Status|Invoice\s*No\b|$)/is);
     if (!m) return '';
     const val = m[1].replace(/\s+/g, ' ').trim();
-    // If empty or contains "Invoice" keyword it means field was blank
     if (!val || /Invoice/i.test(val)) return '';
-    // Must match a real invoice number pattern like MA311-0000106287
     if (!/^[A-Za-z]{2}[A-Za-z0-9\-]+$/.test(val)) return '';
     return val;
 }
 
-/**
- * Line item No. — the row number in the table (e.g. "4")
- * Looks for a digit at the start of a table row after the header row.
- */
 function grabLineNo(text) {
-    /* Find table section after "No. Description Quantity …" header */
     const tableSection = getTableSection(text);
     if (!tableSection) return '';
     const m = tableSection.match(/^\s*(\d{1,3})\s/m);
     return m ? m[1] : '';
 }
 
-/**
- * Line item Description — the description cell in the table row.
- * Sits between the row number and Quantity.
- * We grab everything between the leading number and the first numeric column.
- */
 function grabLineDescription(text) {
     const tableSection = getTableSection(text);
     if (!tableSection) return '';
 
-    /*
-     * Pattern: leading line-no, then text, then first number (qty/price).
-     * We capture the text blob between them and clean it up.
-     */
     const m = tableSection.match(
         /^\s*\d{1,3}\s+([\s\S]+?)\s+\d[\d,]*\.?\d*\s+\d[\d,]*\.?\d*/m
     );
     if (m) return m[1].replace(/\s+/g, ' ').trim();
 
-    /* Fallback: grab everything after row number on the same line */
     const m2 = tableSection.match(/^\s*\d{1,3}\s+(.+)/m);
     return m2 ? m2[1].trim() : '';
 }
 
-/**
- * Returns the portion of text that is the line-item table body
- * (everything after the "No. Description Quantity …" header row,
- *  up to the "Invoice Amount Summary" section).
- */
 function getTableSection(text) {
     const start = text.search(/\bNo\.?\s+Description\b/i);
     if (start === -1) return '';
@@ -361,30 +314,16 @@ function getTableSection(text) {
     return end > start ? text.slice(start, end) : text.slice(start);
 }
 
-/**
- * Grab numeric columns from the table row.
- * col: 'quantity' | 'unitprice' | 'grossex' | 'gst' | 'grossinc'
- *
- * The table row pattern (from the invoice image):
- *   <No>  <description text>  <Qty>  <UnitPrice>  <GrossEx>  <GST>  <GrossInc>
- *
- * We extract the full row then pick columns by position.
- */
 function grabTableCol(text, col) {
     const tableSection = getTableSection(text);
     if (!tableSection) return '';
 
-    /*
-     * Match a row that starts with a line number and contains
-     * at least 4 numeric values (handles OCR spacing noise).
-     */
     const rowMatch = tableSection.match(
         /^\s*\d{1,3}\s+[\s\S]+?([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s*$/m
     );
 
     if (!rowMatch) return '';
 
-    /* rowMatch[1]=Qty, [2]=UnitPrice, [3]=GrossEx, [4]=GST, [5]=GrossInc */
     const map = {
         quantity : rowMatch[1],
         unitprice: rowMatch[2],
@@ -411,7 +350,6 @@ async function downloadExcel() {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Invoice Lines');
 
-    /* ── Set column widths (no header here, we add manually) ── */
     ws.columns = headers.map((h, i) => {
         const dataMax = exportRows.reduce((max, row) => {
             const v = row[i] != null ? String(row[i]) : '';
@@ -420,7 +358,6 @@ async function downloadExcel() {
         return { key: 'col' + i, width: Math.max(h.length, dataMax) + 4 };
     });
 
-    /* ── Add header row manually so we can style it ── */
     const headerRow = ws.addRow(headers);
     headerRow.height = 30;
     headerRow.eachCell({ includeEmpty: true }, cell => {
@@ -436,7 +373,6 @@ async function downloadExcel() {
         };
     });
 
-    /* ── Add data rows ── */
     exportRows.forEach((row, idx) => {
         const exRow = ws.addRow(row);
         exRow.height = 20;
@@ -453,10 +389,8 @@ async function downloadExcel() {
         });
     });
 
-    /* ── Freeze header row ── */
     ws.views = [{ state: 'frozen', xSplit: 0, ySplit: 1, topLeftCell: 'A2', activeCell: 'A2' }];
 
-    /* ── Export as blob ── */
     const buf  = await wb.xlsx.writeBuffer();
     const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const url  = URL.createObjectURL(blob);
@@ -479,7 +413,6 @@ function toNumber(v) {
 
 function toExcelDate(s) {
     if (!s) return '';
-    /* Support dd/mm/yyyy, dd-mm-yyyy, yyyy-mm-dd */
     let d, mth, y;
     let m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
     if (m) {
