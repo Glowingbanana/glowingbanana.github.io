@@ -115,11 +115,11 @@ async function convertPDF() {
 
             if (isContinuation) {
                 const lastRow = exportRows[exportRows.length - 1];
-                const currency = grab(pageText, /Currency\s*(?:[:\-]\s*|\s+)([^\n\r]+)/i);
-                const subtotal = toNumber(grab(pageText, /Sub\s*Total\s*\(?Excluding\s*GST\)?\s*(?:[:\-]\s*|\s+)([\d\s,\.]+)/i));
-                const gst      = toNumber(grab(pageText, /Total\s*GST\s*Payable\s*(?:[:\-]\s*|\s+)([\d\s,\.]+)/i));
-                const freight  = toNumber(grab(pageText, /Freight\s*Amount\s*(?:[:\-]\s*|\s+)([\d\s,\.]+)/i));
-                const total    = toNumber(grab(pageText, /Total\s*Invoice\s*Amount\s*(?:[:\-]\s*|\s+)([\d\s,\.]+)/i));
+                const currency = grab(pageText, /Currency\s*(?:\s*[:\-]\s*|\s+)([^\n\r]+)/i);
+                const subtotal = toNumber(grab(pageText, /Sub\s*Total\s*\(?Excluding\s*GST\)?\s*(?:\s*[:\-]\s*|\s+)([\d\s,\.]+)/i));
+                const gst      = toNumber(grab(pageText, /Total\s*GST\s*Payable\s*(?:\s*[:\-]\s*|\s+)([\d\s,\.]+)/i));
+                const freight  = toNumber(grab(pageText, /Freight\s*Amount\s*(?:\s*[:\-]\s*|\s+)([\d\s,\.]+)/i));
+                const total    = toNumber(grab(pageText, /Total\s*Invoice\s*Amount\s*(?:\s*[:\-]\s*|\s+)([\d\s,\.]+)/i));
                 if (currency) lastRow[16] = currency;
                 if (subtotal !== '') lastRow[17] = subtotal;
                 if (gst      !== '') lastRow[18] = gst;
@@ -136,7 +136,7 @@ async function convertPDF() {
             }
 
             /* ── Exclude drafts if requested ── */
-            const status = grab(pageText, /Invoice\s*Status\s*(?:[:\-]\s*|\s+)([A-Za-z]+)/i);
+            const status = grab(pageText, /Invoice\s*Status\s*(?:\s*[:\-]\s*|\s+)([A-Za-z]+)/i);
             if (excludeDraftCb.checked && /draft/i.test(status || '')) continue;
 
             /* ── Parse & push row ── */
@@ -204,9 +204,12 @@ function looksLikeInvoice(text) {
 
 /* ========= PARSE ONE PAGE → ONE ROW ========= */
 /*
- * SEP = separator pattern: handles both "Field: value" and "Field value" (Adobe OCR omits colons)
+ * SEP matches all three separator styles:
+ *   "Field: value"        → colon directly after label
+ *   "Field : value"       → space then colon (native digital PDFs)
+ *   "Field value"         → just a space (Adobe OCR, no colon)
  */
-const SEP = '(?:[:\\-]\\s*|\\s+)';
+const SEP = '(?:\\s*[:\\-]\\s*|\\s+)';
 
 function parsePage(text) {
     const t = text.replace(/\u00A0/g, ' ').replace(/[ \t]+/g, ' ');
@@ -245,11 +248,11 @@ function grab(text, regex) {
 
 function grabHeaderDescription(text) {
     const headerSection = text.split(/\bNo\.?\s+Description\b/i)[0] || text;
-    return grab(headerSection, /\bDescription\s*(?:[:\-]\s*|\s+)([^\n\r]+)/i);
+    return grab(headerSection, /\bDescription\s*(?:\s*[:\-]\s*|\s+)([^\n\r]+)/i);
 }
 
 function grabRelatedInvoiceNo(text) {
-    const m = text.match(/Related\s*Invoice\s*No\s*(?:[:\-]\s*|\s+)?(.*?)(?=Invoice\s*Status|Invoice\s*No\b|$)/is);
+    const m = text.match(/Related\s*Invoice\s*No\s*(?:\s*[:\-]\s*|\s+)?(.*?)(?=Invoice\s*Status|Invoice\s*No\b|$)/is);
     if (!m) return '';
     const val = m[1].replace(/\s+/g, ' ').trim();
     if (!val || /Invoice/i.test(val)) return '';
@@ -288,10 +291,7 @@ function grabTableCol(text, col) {
     const tableSection = getTableSection(text);
     if (!tableSection) return '';
 
-    /*
-     * Numbers may have spaces injected by Adobe OCR e.g. "17 ,220.000"
-     * Pattern: [\d][\d\s,]*\.?\d*  matches numbers with optional spaces/commas
-     */
+    /* Numbers may have spaces injected by Adobe OCR e.g. "17 ,220.000" */
     const NUM = '([\\d][\\d\\s,]*\\.?\\d*)';
     const rowMatch = tableSection.match(
         new RegExp(`^\\s*\\d{1,3}\\s+[\\s\\S]+?${NUM}\\s+${NUM}\\s+${NUM}\\s+${NUM}\\s+${NUM}\\s*$`, 'm')
