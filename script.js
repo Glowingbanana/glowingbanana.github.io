@@ -299,24 +299,20 @@ function grabVendorID(text) {
  * Handles both "Invoicing Instruction ID" and "Invoice Instruction ID".
  */
 function grabInvoicingInstructionID(text) {
-    /* Lazy match stopping before "Description :" or newline */
-    const m = text.match(/Invoice(?:ing)?\s*Instruction\s*(?:ID)?\s*(?:\s*[:\-]\s*|\s+)(.+?)(?=\s*Description\s*[:\-]|\n|$)/i);
+    // Split at "Description :" so we only look in the portion BEFORE it
+    const beforeDesc = text.split(/\bDescription\s*[:\-]/i)[0] || text;
+    const m = beforeDesc.match(/Invoic(?:e|ing)?\s*Instruction\s*(?:ID)?\s*[:\-]\s*([^\n\r]+)/i);
     return m ? m[1].trim() : '';
 }
 
-/**
- * Header Description — the "Description :" field above the table.
- * In digital PDFs this appears on the same line as Invoicing Instruction ID:
- * "Invoicing Instruction ID : GVT000... Description : INTSG015..."
- * We specifically look for "Description :" with a colon to avoid matching
- * the table column header "No. Description".
- */
 function grabHeaderDescription(text) {
-    /* Look for "Description :" label — requires colon so we don't match table header */
-    const m = text.match(/\bDescription\s*[:\-]\s*(.+?)(?=\s*No\.?\s+Description|\s*$)/is);
-    if (!m) return '';
-    /* Clean up — trim and collapse internal whitespace */
-    return m[1].replace(/\s+/g, ' ').trim();
+    // Split at "Description :" and take the part AFTER it
+    const parts = text.split(/\bDescription\s*[:\-]\s*/i);
+    if (parts.length < 2) return '';
+    const afterDesc = parts[1];
+    // Stop at "No. Description" table header or newline
+    const m = afterDesc.match(/^([\s\S]+?)(?=\s*No\.?\s+Description\b|\n|$)/i);
+    return m ? m[1].replace(/\s+/g, ' ').trim() : afterDesc.split('\n')[0].trim();
 }
 
 function grabRelatedInvoiceNo(text) {
