@@ -333,42 +333,24 @@ function grabLineDescription(text) {
         const ts = endIdx > startIdx ? text.slice(startIdx, endIdx) : text.slice(startIdx);
         body = ts.replace(/^.*\n/, ''); // skip header line
     } else {
-        const fallback = text.search(/^\s*\d{1,3}\s*\|/m); // require pipe — avoids matching address lines
+        const fallback = text.search(/^\s*\d{1,3}\s*\|/m);
         body = fallback !== -1 ? (endIdx > fallback ? text.slice(fallback, endIdx) : text.slice(fallback)) : '';
     }
     if (!body) return '';
 
-    const NUM_ROW  = /[\d,]+\.?\d*\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*/;
-    const NUM_FULL = /^(.*?)\s+([\d,]+\.?\d*\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*)\s*(.*)$/;
-
-    const descParts = [];
-    let foundNumbers = false;
-
-    for (const line of body.split('\n').filter(l => l.trim())) {
-        /* Stop if we hit a new table row after already processing numbers */
-        if (foundNumbers && /^\s*\d{1,3}\s+[A-Za-z\|\[\(]/.test(line)) break;
-
-        if (!foundNumbers && NUM_ROW.test(line)) {
-            foundNumbers = true;
-            const m = line.match(NUM_FULL);
-            if (m) {
-                const prefix = m[1].replace(/^\s*\d{0,3}\s*[\|]*\s*/, '').trim();
-                /* Suffix after numbers — strip trailing OCR noise digits */
-                const suffix = m[3].replace(/\s+\d+\s*$/, '').replace(/^\s*\d+\s*$/, '').trim();
-                if (prefix) descParts.push(prefix);
-                if (suffix) descParts.push(suffix);
-            }
-            /* Don't break — collect any continuation lines below */
-        } else if (!NUM_ROW.test(line)) {
-            descParts.push(line);
-        }
+    /* Join all lines — handles numbers split across lines by OCR */
+    const joined = body.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+    const NUM5 = /^(.*?)\s+([\d,]+\.?\d*\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*)\s*(.*)$/;
+    const m = joined.match(NUM5);
+    if (m) {
+        const prefix = m[1].replace(/^\s*\d{0,3}\s*[\|]*\s*/, '').trim();
+        const suffix = m[3].replace(/\s+\d+\s*$/, '').replace(/^\s*\d+\s*$/, '').trim();
+        return [prefix, suffix].filter(Boolean).join(' ')
+            .replace(/\s+/g, ' ').trim()
+            .replace(/[\]\|©]+$/, '')
+            .replace(/\s+\d{1,2}\s*$/, '');
     }
-
-    return descParts.join(' ')
-        .replace(/^\s*\d{0,3}\s*[\|]*\s*/, '')
-        .replace(/\s+/g, ' ').trim()
-        .replace(/[\]\|©]+$/, '')
-        .replace(/\s+\d{1,2}\s*$/, ''); // strip trailing OCR noise digits
+    return joined.replace(/^\s*\d{0,3}\s*[\|]*\s*/, '').trim();
 }
 
 /**
@@ -394,24 +376,15 @@ function getTableSection(text) {
 }
 
 function grabTableCol(text, col) {
-    const tableSection = getTableSection(text);
-    if (!tableSection) return '';
+    const ts = getTableSection(text);
+    if (!ts) return '';
 
+    /* Join all lines — handles numbers split across lines by OCR */
+    const joined = ts.replace(/\n/g, ' ').replace(/\s+/g, ' ');
     const NUM = '([\\d][\\d,]*\\.?\\d*)';
-    const rowMatch = tableSection.match(
-        new RegExp(`^\\s*\\d{1,3}\\s+[\\s\\S]+?${NUM}\\s+${NUM}\\s+${NUM}\\s+${NUM}\\s+${NUM}\\s*$`, 'm')
-    );
-
-    if (!rowMatch) return '';
-
-    const map = {
-        quantity : rowMatch[1],
-        unitprice: rowMatch[2],
-        grossex  : rowMatch[3],
-        gst      : rowMatch[4],
-        grossinc : rowMatch[5]
-    };
-    return map[col] || '';
+    const m = joined.match(new RegExp(NUM + '\\s+' + NUM + '\\s+' + NUM + '\\s+' + NUM + '\\s+' + NUM));
+    if (!m) return '';
+    return { quantity: m[1], unitprice: m[2], grossex: m[3], gst: m[4], grossinc: m[5] }[col] || '';
 }
 
 /* ========= DOWNLOAD ========= */
