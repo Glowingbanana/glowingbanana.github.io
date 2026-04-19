@@ -338,7 +338,7 @@ function grabLineDescription(text) {
     const m = tableSection.match(
         /^\s*\d{1,3}\s+([\s\S]+?)\s+[\d\s,]+\.?\d*\s+[\d\s,]+\.?\d*/m
     );
-    if (m) return m[1].replace(/\s+/g, ' ').trim();
+    if (m) return m[1].replace(/\s+/g, ' ').trim().replace(/^[\|\[\(©\s]+/, '').replace(/[\]\|©\s]+$/, '');
 
     const m2 = tableSection.match(/^\s*\d{1,3}\s+(.+)/m);
     return m2 ? m2[1].trim() : '';
@@ -466,15 +466,16 @@ function toNumber(v) {
 
 function toExcelDate(s) {
     if (!s) return '';
+    s = s.replace(/\s/g, ''); // strip OCR-injected spaces e.g. '28/07/ 2025'
     let d, mth, y;
-    let m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+    let m = s.match(/^(\d{1,2})\s*[\/\-]\s*(\d{1,2})\s*[\/\-]\s*(\d{2,4})$/);
     if (m) {
         [, d, mth, y] = m;
         if (y.length === 2) y = '20' + y;
         const dt = new Date(+y, +mth - 1, +d);
         return isNaN(dt) ? s : dt;
     }
-    m = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+    m = s.match(/^(\d{4})\s*[\/\-]\s*(\d{1,2})\s*[\/\-]\s*(\d{1,2})$/);
     if (m) {
         [, y, mth, d] = m;
         const dt = new Date(+y, +mth - 1, +d);
