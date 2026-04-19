@@ -338,19 +338,26 @@ function grabLineDescription(text) {
     }
     if (!body) return '';
 
-    const NUM_ROW = /[\d,]+\.?\d*\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*/;
+    const NUM_ROW  = /[\d,]+\.?\d*\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*/;
+    const NUM_FULL = /^(.*?)\s+([\d,]+\.?\d*\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*)\s*(.*)$/;
+
     const descParts = [];
     let foundNumbers = false;
 
     for (const line of body.split('\n').filter(l => l.trim())) {
-        /* Stop if we hit a new table row after already processing the numbers row */
+        /* Stop if we hit a new table row after already processing numbers */
         if (foundNumbers && /^\s*\d{1,3}\s+[A-Za-z\|\[\(]/.test(line)) break;
 
         if (!foundNumbers && NUM_ROW.test(line)) {
             foundNumbers = true;
-            /* Extract description portion before the 5 numeric columns */
-            const m = line.match(/^(.*?)\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*\s*$/);
-            if (m && m[1].trim()) descParts.push(m[1]);
+            const m = line.match(NUM_FULL);
+            if (m) {
+                const prefix = m[1].replace(/^\s*\d{0,3}\s*[\|]*\s*/, '').trim();
+                /* Suffix after numbers — strip trailing OCR noise digits */
+                const suffix = m[3].replace(/\s+\d+\s*$/, '').replace(/^\s*\d+\s*$/, '').trim();
+                if (prefix) descParts.push(prefix);
+                if (suffix) descParts.push(suffix);
+            }
             /* Don't break — collect any continuation lines below */
         } else if (!NUM_ROW.test(line)) {
             descParts.push(line);
@@ -359,8 +366,7 @@ function grabLineDescription(text) {
 
     return descParts.join(' ')
         .replace(/^\s*\d{0,3}\s*[\|]*\s*/, '')
-        .replace(/\s+/g, ' ')
-        .trim()
+        .replace(/\s+/g, ' ').trim()
         .replace(/[\]\|©]+$/, '');
 }
 
