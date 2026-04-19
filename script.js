@@ -358,7 +358,7 @@ function grabLineDescription(text) {
     }
 
     return descParts.join(' ')
-        .replace(/^\s*\d{0,3}\s*[\|\[\(]*\s*/, '')
+        .replace(/^\s*\d{0,3}\s*[\|]*\s*/, '')
         .replace(/\s+/g, ' ')
         .trim()
         .replace(/[\]\|©]+$/, '');
