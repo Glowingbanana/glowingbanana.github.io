@@ -299,20 +299,14 @@ function grabVendorID(text) {
  * Handles both "Invoicing Instruction ID" and "Invoice Instruction ID".
  */
 function grabInvoicingInstructionID(text) {
-    // Split at "Description :" so we only look in the portion BEFORE it
-    const beforeDesc = text.split(/\bDescription\s*(?:[:\-]|\s+\d+)/i)[0] || text;
-    const m = beforeDesc.match(/Invoic(?:e|ing)?\s*Instruction\s*(?:ID)?\s*[:\-]\s*([^\n\r]+)/i);
+    const m = text.match(/Invoic(?:e|ing)?\s*Instruction\s*(?:ID)?\s*[:\-]\s*(.+?)(?=\s*\bDescription\s*(?:[:\-]|\s+\d)|\n|$)/i);
     return m ? m[1].trim() : '';
 }
 
 function grabHeaderDescription(text) {
-    // Split at "Description :" and take the part AFTER it
-    const parts = text.split(/\bDescription\s*(?:[:\-]\s*|\s+\d+\s*)/i);
-    if (parts.length < 2) return '';
-    const afterDesc = parts[1];
-    // Stop at "No. Description" table header or newline
-    const m = afterDesc.match(/^([\s\S]+?)(?=\s*(?:No\.?\s+Description|Quantity\s+Unit\s*Price)\b|\n(?=[^\n]*\|)|\s*$)/i);
-    return m ? m[1].replace(/\s+/g, ' ').trim() : afterDesc.split('\n')[0].trim();
+    const m = text.match(/\bDescription\s*(?:[:\-]\s*|\s+\d+\s*)(.+?)(?=\s*(?:No\.?\s+Description\b|Quantity\s+Unit)|\n[^\n]*\||\s*$)/is);
+    if (!m) return '';
+    return m[1].replace(/\s+/g, ' ').trim();
 }
 
 function grabRelatedInvoiceNo(text) {
