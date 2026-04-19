@@ -311,7 +311,7 @@ function grabHeaderDescription(text) {
     if (parts.length < 2) return '';
     const afterDesc = parts[1];
     // Stop at "No. Description" table header or newline
-    const m = afterDesc.match(/^([\s\S]+?)(?=\s*No\.?\s+Description\b|\n|$)/i);
+    const m = afterDesc.match(/^([\s\S]+?)(?=\s*(?:No\.?\s+Description|Quantity\s+Unit\s*Price)\b|\n(?=[^\n]*\|)|\s*$)/i);
     return m ? m[1].replace(/\s+/g, ' ').trim() : afterDesc.split('\n')[0].trim();
 }
 
